@@ -1,0 +1,342 @@
+---
+title: "Abalone Data"
+author: "Eric Liang, Ishan Varshney, John Chen, Noah Wong Maclean, Shadi Bitarfhaghighi"
+execute:
+  echo: True
+format: 
+  revealjs:
+    footer: "[stats115.com](https://stats115.com)"
+    slide-number: true
+    incremental: true
+    logo: "https://www.stats115.com/img/logo.png"
+    title-slide-attributes: 
+      data-background-image: "https://stats115.com/img/logo.png"
+      data-background-size: 5%
+      data-background-position: 50% 85%
+---
+
+## Why Abalone?
+
+Abalone is a highly sought-after seafood globally, contributing significantly to the economy. Many individuals and nations depend on it for simple food and economic stability. Therefore, studying abalone populations is crucial. However, determining the age of abalone is a very time consuming and tedious process. It involves slicing the shell, staining it, and counting the rings under a microscope. Other measurements that are simpler to acquire can be used for age estimation. That is what our goal is for this project.
+
+```{r echo=FALSE}
+library(bayesrules)
+library(tidyverse)
+library(rstanarm)
+library(bayesplot)
+library(tidybayes)
+library(broom.mixed)
+library(ggcorrplot)
+library(janitor)
+library(rstan)
+library(gridExtra)
+library(xtable)
+theme_set(theme_gray(base_size = 18))
+options(xtable.type = 'html')
+```
+
+------------------------------------------------------------------------
+
+## Our Data
+
+The goal of this data source and project is to predict the age of the abalone from physical measurements. The data has been scaled by dividing continuous values of variables such as length, diameter, height and shell weight by 200.
+
+```{r echo = FALSE, fig.height=5}
+abalone <- read.csv("abalone.data", header = FALSE)
+column_names <- c("Sex", "Length", "Diameter", "Height", "Whole_weight", 
+                  "Shucked_weight", "Viscera_weight", "Shell_weight", "Rings")
+colnames(abalone) <- column_names
+abalone <- cbind(abalone, model.matrix(~ Sex - 1, data = abalone))
+```
+
+```{r echo = FALSE, fig.height=5}
+abalone$Sex <- factor(abalone$Sex)
+glimpse(abalone)
+```
+
+## Variables of Interest
+
+X variables: Diameter, Shell Weight, SEX (as categorical factor)
+
+Y variable: Rings
+
+## Potential Data and Source Issues
+
+1.  The source has already removed NA values. Based on our learning from our Bayesian analysis class and previous statistics classes, we know that we have to be very careful when removing NA values since these values may contain significance that can vary predictions and results. Since we do not know the basis on which these values have been removed, some relevant data points might have been removed from the source.
+
+2.  Another issue with the dataset pertains to relevance. Since the data is from 1995 and over 29 years old, the predictions and conclusions drawn from this data might not be as relevant today due to the age of the data source.
+
+------------------------------------------------------------------------
+
+## Exploratory: Physical Measurements
+
+```{r echo=FALSE, fig.height=5}
+# Scatter plot for Length vs. Rings
+g1 <- ggplot(abalone, aes(x = Length, y = Rings)) +
+  geom_point() +
+  labs(x = "Length", y = "Rings") +
+  ggtitle("Length vs. Rings")
+
+# Scatter plot for Diameter vs. Rings
+g2 <- ggplot(abalone, aes(x = Diameter, y = Rings)) +
+  geom_point() +
+  labs(x = "Diameter", y = "Rings") +
+  ggtitle("Diameter vs. Rings")
+
+# Scatter plot for Height vs. Rings
+g3 <- ggplot(abalone, aes(x = Height, y = Rings)) +
+  geom_point() +
+  labs(x = "Height", y = "Rings") +
+  ggtitle("Height vs. Rings")+
+  xlim(0, 0.7)
+
+gridExtra::grid.arrange(g1,g2,g3, ncol=3)
+```
+
+------------------------------------------------------------------------
+
+## Exploratory: Weight Measurements
+
+```{r echo=FALSE, fig.height=5}
+# Scatter plot for Whole_weight vs. Rings
+g4 <- ggplot(abalone, aes(x = Whole_weight, y = Rings)) +
+  geom_point() +
+  labs(x = "Whole Weight", y = "Rings") +
+  ggtitle("Whole Weight vs. Rings")
+
+# Scatter plot for Shucked_weight vs. Rings
+g5 <- ggplot(abalone, aes(x = Shucked_weight, y = Rings)) +
+  geom_point() +
+  labs(x = "Shucked Weight", y = "Rings") +
+  ggtitle("Shucked Weight vs. Rings")
+
+# Scatter plot for Viscera_weight vs. Rings
+g6 <- ggplot(abalone, aes(x = Viscera_weight, y = Rings)) +
+  geom_point() +
+  labs(x = "Viscera Weight", y = "Rings") +
+  ggtitle("Viscera Weight vs. Rings")
+
+# Scatter plot for Shell_weight vs. Rings
+g7 <- ggplot(abalone, aes(x = Shell_weight, y = Rings)) +
+  geom_point() +
+  labs(x = "Shell Weight", y = "Rings") +
+  ggtitle("Shell Weight vs. Rings")
+gridExtra::grid.arrange(g4, g5, g6, g7, ncol=2, nrow=2)
+```
+
+------------------------------------------------------------------------
+
+## Exploratory: Gender
+
+```{r echo = FALSE, fig.height=5}
+ggplot(abalone, aes(x = Sex, y = Rings, color = Sex)) +
+  geom_point() +
+  labs(x = "Sex", y = "Rings") +
+  scale_color_manual(values = c("M" = "blue", "F" = "red", "I" = "green")) +
+  ggtitle("Sex vs. Rings")
+```
+
+------------------------------------------------------------------------
+
+## Exploratory: HeatMap / Coorelation Matrix
+
+```{r echo=FALSE, fig.height=5}
+correlation_matrix <- cor(abalone[, c("SexF", "SexI", "SexM", "Height","Length","Diameter", "Whole_weight", "Shucked_weight", "Viscera_weight", "Shell_weight", "Rings")])
+
+ggcorrplot(correlation_matrix, type = "full", lab = TRUE)
+```
+
+------------------------------------------------------------------------
+
+## Prior Model
+
+$Y_i \, | \, \beta_0, \beta_1, \beta_2, \beta_3, \beta_4, \sigma \; \stackrel{\text{ind}}{\sim} N\left(\mu_i, \sigma^2\right)$ with $\mu_i = \beta_0 + \beta_1 X_{i1} + \beta_2 X_{i2} + \beta_3 X_{i3} + \beta_4 X_{i4}$
+
+$\text{prior models:}$
+
+$\text{Intercept: } \beta_0\sim N(m_0, s_0 )$\
+$\text{Diameter: } \beta_1\sim N(m_1, s_1 )$\
+$\text{Shell_Weight: } \beta_2\sim N(m_2, s_2 )$\
+$\text{SexI: } \beta_3\sim N(m_3, s_3 )$\
+$\text{SexM: } \beta_4\sim N(m_4, s_4 )$\
+$\sigma \sim \text{Exp}(l)$
+
+------------------------------------------------------------------------
+
+## Simulation via `rstanarm`
+
+```{r cache=TRUE}
+abalone_model <- stan_glm(Rings ~ Diameter + Shell_weight + SexI + SexM, 
+                          data = abalone,
+                          family = gaussian,
+                          prior_intercept = normal(2, 1),
+                          prior = c(
+                            normal(1, 1),       # Prior for Diameter coefficient
+                            normal(1, 1),       # Prior for Shell_weight coefficient
+                            normal(-2, 2),      # Prior for SexI coefficient
+                            normal(2, 2)        # Weakly prior for Male Sex coefficient
+                          ),
+                          chains = 4, iter = 5000*2, seed = 84735,
+                          refresh = FALSE)
+```
+
+------------------------------------------------------------------------
+
+## Posterior Summary Statistics
+
+```{r}
+tidy(abalone_model, effects = c("fixed", "aux"),
+     conf.int = TRUE, conf.level = 0.80)
+
+prediction_summary(abalone_model, data = abalone)
+```
+
+## Posterior Graphs For Diameter
+
+```{r}
+set.seed(84735)
+predictions <- posterior_predict(abalone_model, newdata = abalone)
+
+ppc_intervals(abalone$Rings, yrep = predictions, x = abalone$Diameter, 
+              prob = 0.5, prob_outer = 0.95)
+
+```
+
+## Posterior Graphs For Shell_weight
+
+```{r}
+ppc_intervals(abalone$Rings, yrep = predictions, x = abalone$Shell_weight, 
+              prob = 0.5, prob_outer = 0.95)
+```
+
+## Model Evaluation & Comparison
+
+```{r}
+abalone_model_1 <- stan_glm(Rings ~ Diameter, 
+                          data = abalone,
+                          family = gaussian,
+                          chains = 4, iter = 5000*2, seed = 84735, refresh = FALSE)
+abalone_model_2 <- stan_glm(Rings ~ Shell_weight, 
+                          data = abalone,
+                          family = gaussian,
+                          chains = 4, iter = 5000*2, seed = 84735, refresh = FALSE)
+abalone_model_3 <- stan_glm(Rings ~ SexI + SexM, 
+                          data = abalone,
+                          family = gaussian,
+                          chains = 4, iter = 5000*2, seed = 84735, refresh = FALSE)
+abalone_model_4 <- stan_glm(Rings ~ Diameter + Shell_weight, 
+                          data = abalone,
+                          family = gaussian,
+                          chains = 4, iter = 5000*2, seed = 84735, refresh = FALSE)
+abalone_model_5 <- stan_glm(Rings ~ Diameter + SexI + SexM, 
+                          data = abalone,
+                          family = gaussian,
+                          chains = 4, iter = 5000*2, seed = 84735, refresh = FALSE)
+abalone_model_6 <- stan_glm(Rings ~ Shell_weight + SexI + SexM, 
+                          data = abalone,
+                          family = gaussian,
+                          chains = 4, iter = 5000*2, seed = 84735, refresh = FALSE)
+abalone_model_7 <- stan_glm(Rings ~ Diameter + Shell_weight + SexI + SexM, 
+                          data = abalone,
+                          family = gaussian,
+                          chains = 4, iter = 5000*2, seed = 84735, refresh = FALSE)
+
+```
+
+## Model Evaluation & Comparison Continued
+
+```{r}
+
+g1 <- pp_check(abalone_model_1) + theme(legend.position = "bottom")
+g2 <- pp_check(abalone_model_2) + theme(legend.position = "bottom")
+g3 <- pp_check(abalone_model_3) + theme(legend.position = "bottom")
+g4 <- pp_check(abalone_model_4) + theme(legend.position = "bottom")
+g5 <- pp_check(abalone_model_5) + theme(legend.position = "bottom")
+g6 <- pp_check(abalone_model_6) + theme(legend.position = "bottom")
+g7 <- pp_check(abalone_model_7) + theme(legend.position = "bottom")
+gridExtra::grid.arrange(g1,g2,g3,g4, g5, g6, g7,ncol = 4,nrow = 2)
+
+##
+
+abalone_data <- abalone %>% 
+  select(Rings, Diameter, Shell_weight, SexI, SexM, SexF)
+
+
+set.seed(84735)
+ps_1 <- prediction_summary_cv(
+  data = abalone_data, model = abalone_model_1, k = 10)$cv
+
+set.seed(84735)
+ps_2 <- prediction_summary_cv(
+  data = abalone_data, model = abalone_model_2, k = 10)$cv
+
+set.seed(84735)
+ps_3 <- prediction_summary_cv(
+  data = abalone_data, model = abalone_model_3, k = 10)$cv
+
+
+```
+
+## Model Evaluation & Comparison Continued
+
+```{r}
+set.seed(84735)
+ps_4 <- prediction_summary_cv(
+  data = abalone_data, model = abalone_model_4, k = 10)$cv
+
+set.seed(84735)
+ps_5 <- prediction_summary_cv(
+  data = abalone_data, model = abalone_model_5, k = 10)$cv
+
+set.seed(84735)
+ps_6 <- prediction_summary_cv(
+  data = abalone_data, model = abalone_model_6, k = 10)$cv
+
+set.seed(84735)
+ps_7 <- prediction_summary_cv(
+  data = abalone_data, model = abalone_model_7, k = 10)$cv
+
+post_sum_df <- data.frame(rbind(round(ps_1,3), round(ps_2,3), round(ps_3,3), round(ps_4,3), round(ps_5,3), round(ps_6,3), round(ps_7,3)))
+
+
+```
+
+## Model Evaluation & Comparison Continued
+
+```{r}
+test_mat <- matrix(
+  c("abalone_model_1", post_sum_df[1,],
+    "abalone_model_2", post_sum_df[2,],
+    "abalone_model_3", post_sum_df[3,],
+    "abalone_model_4", post_sum_df[4,],
+    "abalone_model_5", post_sum_df[5,],
+    "abalone_model_6", post_sum_df[6,],
+    "abalone_model_7", post_sum_df[7,]
+    ), nrow = 7, byrow = TRUE)
+
+```
+
+## Model Evaluation Table
+
+```{r}
+cat("model           mae  mae scaled  within 50  within 95\n")
+write.table(test_mat, row.names=F, col.names=F, sep="\t")
+```
+
+## Results
+
+From our analysis on the Abalone dataset, we found that the diameter and the shell weight positively correlates with the abalone’s ring count. The number of rings is estimated to increase by 2.78 mm per 1 mm increase in diameter; The number of rings is estimated to increase by 10.17 per 1 gram increase in shell weight. There is a negative correlation with the number of rings in infant and male abalones compared to females in which the number of rings decrease by 1.09 mm and 0.16 mm respectively. The prediction summary of the model indicates that the number of rings predicted deviates from the observed abalone data by 1.37 mm.
+
+## Results continued
+
+The PPC interval for Diameter and Shell weight indicates that both predictors have a positive correlation with the number of rings an abalone has. In addition, the graph also shows that most of the observed data points fall within the 95% predictive interval range, meaning that the predictions are consistent with the observed data.
+
+## Benefits from Results
+
+If we could create a model to predict the age of abalone, it would help many different types of people through the abalone market chain. Researchers would not have to spend so much time and effort determining age, meaning farmers would be able to cut down on costs, which would ultimately mean customers would be able to purchase the product at a cheaper rate. 
+
+The traditional, complicated approach of determining the age of abalone raises expenses and restricts its worldwide appeal. That is why we believe determining the age of abalone with factors such as its length, height, and weight would have a worldwide impact.
+
+## Analysis Limitations & Future Work
+
+If unlimited time and resources were available, fixing the limitations of our abalone research would include a few important steps. First, we would gather new data to make sure we're working with the most up-to-date information about abalone populations and their biology. In addition, we'd expand our dataset to include samples from different types of abalone, and classify them within the data. We would also spend time refining our model development process, getting advice from experts in the field abalone to make our predictions more accurate in terms of the predicting variables. Finally, we'd invest into front-end developers and create a website and mobile application that calculates the estimated price of abalone given certain features of it.

@@ -1,0 +1,148 @@
+---
+title: "Abalone Data"
+author: "Eric Liang, Ishan Varshney, John Chen, Noah Wong Maclean, Shadi Bitarfhaghighi"
+execute:
+  echo: true
+format: 
+  revealjs:
+    footer: "[stats115.com](https://stats115.com)"
+    slide-number: true
+    incremental: true
+    logo: "https://www.stats115.com/img/logo.png"
+    title-slide-attributes: 
+      data-background-image: "https://stats115.com/img/logo.png"
+      data-background-size: 5%
+      data-background-position: 50% 85%
+      
+---
+## Why Abalone?
+
+Abalone is a highly sought-after seafood globally, contributing significantly to the economy. Many individuals and nations depend on it for simple food and economic stability. Therefore, studying abalone populations is crucial. However, determining the age of abalone is a very time consuming and tedious process. It involves slicing the shell, staining it, and counting the rings under a microscope. Other measurements that are simpler to acquire can be used for age estimation. That is what our goal is for this project.
+
+
+```{r echo: false}
+library(bayesrules)
+library(tidyverse)
+library(rstanarm)
+library(bayesplot)
+library(tidybayes)
+library(broom.mixed)
+library(ggcorrplot)
+library(janitor)
+library(rstan)
+library(gridExtra)
+theme_set(theme_gray(base_size = 18))
+```
+
+
+---
+## Our Data
+
+The goal of this data source and project is to predict the age of the abalone from physical measurements.
+The data has been scaled by dividing continuous values of variables such as length, diameter, height and shell weight by 200. 
+
+```{r echo = FALSE, fig.height=5}
+abalone <- read.csv("abalone.data", header = FALSE)
+column_names <- c("Sex", "Length", "Diameter", "Height", "Whole_weight", 
+                  "Shucked_weight", "Viscera_weight", "Shell_weight", "Rings")
+colnames(abalone) <- column_names
+abalone <- cbind(abalone, model.matrix(~ Sex - 1, data = abalone))
+```
+
+```{r echo = FALSE, fig.height=5}
+abalone$Sex <- factor(abalone$Sex)
+glimpse(abalone)
+```
+
+---
+## Exploratory: Physical Measurements
+
+```{r echo= FALSE, fig.height=5}
+# Scatter plot for Length vs. Rings
+g1 <- ggplot(abalone, aes(x = Length, y = Rings)) +
+  geom_point() +
+  labs(x = "Length", y = "Rings") +
+  ggtitle("Length vs. Rings")
+
+# Scatter plot for Diameter vs. Rings
+g2 <- ggplot(abalone, aes(x = Diameter, y = Rings)) +
+  geom_point() +
+  labs(x = "Diameter", y = "Rings") +
+  ggtitle("Diameter vs. Rings")
+
+# Scatter plot for Height vs. Rings
+g3 <- ggplot(abalone, aes(x = Height, y = Rings)) +
+  geom_point() +
+  labs(x = "Height", y = "Rings") +
+  ggtitle("Height vs. Rings")
+
+gridExtra::grid.arrange(g1,g2,g3, ncol=3)
+```
+
+---
+## Exploratory: Weights
+```{r echo = FALSE, fig.height=5, fig.width = 5}
+# Scatter plot for Whole_weight vs. Rings
+g4 <- ggplot(abalone, aes(x = Whole_weight, y = Rings)) +
+  geom_point() +
+  labs(x = "Whole Weight", y = "Rings") +
+  ggtitle("Whole Weight vs. Rings")
+
+# Scatter plot for Shucked_weight vs. Rings
+g5 <- ggplot(abalone, aes(x = Shucked_weight, y = Rings)) +
+  geom_point() +
+  labs(x = "Shucked Weight", y = "Rings") +
+  ggtitle("Shucked Weight vs. Rings")
+
+# Scatter plot for Viscera_weight vs. Rings
+g6 <- ggplot(abalone, aes(x = Viscera_weight, y = Rings)) +
+  geom_point() +
+  labs(x = "Viscera Weight", y = "Rings") +
+  ggtitle("Viscera Weight vs. Rings")
+
+# Scatter plot for Shell_weight vs. Rings
+g7 <- ggplot(abalone, aes(x = Shell_weight, y = Rings)) +
+  geom_point() +
+  labs(x = "Shell Weight", y = "Rings") +
+  ggtitle("Shell Weight vs. Rings")
+
+```
+
+---
+## Exploratory: Gender Measurements
+
+```{r echo = FALSE, fig.height=5}
+g1<-ggplot(abalone, aes(x = Sex, y = Rings, color = Sex)) +
+  geom_point() +
+  labs(x = "Sex", y = "Rings") +
+  scale_color_manual(values = c("M" = "blue", "F" = "red", "I" = "green")) +
+  ggtitle("Sex vs. Rings")
+g1
+```
+
+---
+## Exploratory: Heatmap / Correlatio Matrix
+```{r fig.height=5}
+correlation_matrix <- cor(abalone[, c("SexF", "SexI", "SexM", "Height","Length","Diameter", "Whole_weight", "Shucked_weight", "Viscera_weight", "Shell_weight", "Rings")])
+
+ggcorrplot(correlation_matrix, type = "full", lab = TRUE)
+```
+
+---
+```{r}
+abalone_model <- stan_glm(Rings ~ Diameter + Shell_weight + SexI + SexM, 
+                          data = abalone,
+                          family = gaussian,
+                          prior_intercept = normal(2, 1),
+                          prior = c(
+                            normal(1, 1),       # Prior for Diameter coefficient
+                            normal(1, 1),       # Prior for Shell_weight coefficient
+                            normal(-2, 2),      # Prior for SexI coefficient
+                            normal(3, 2)        # Weakly prior for Male Sex coefficient
+                          ),
+                          chains = 4, iter = 5000*2, seed = 84735,
+                          refresh = FALSE)
+summary(abalone_model)
+```
+
+
